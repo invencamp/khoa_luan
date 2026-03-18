@@ -11,11 +11,13 @@ uint32_t SystemCoreClock = 2097152U;
 float Setpoint = 80.0;
 float alpha_encoder = 0.2f; 
 float d = 100.0;      // Biên do Ro-le (bam xung PWM 100%) xuât 100% công suât PWM
+float h = 0.01; //Chu ky lay mau
 
 volatile uint32_t uwTick;
 volatile uint32_t t_start = 0;       // thoi diêm bat dâu do (ms)
 volatile int16_t encoder_count_prev = 0;
 volatile float Speed = 0.0;
+volatile float Speed_prev1 = 0, Speed_prev2 = 0; 
 volatile float a = 0.0;       // Biên dô dao dông tôc dô
 volatile float Tu = 0.0;      // Chu ky dao dông
 volatile float Kp, Ki, Kd, Ti, Td;
@@ -145,7 +147,7 @@ int main(void){
         }
         new_setpoint_received = false;
     }
-	if (uwTick - last >= 500){
+	if (uwTick - last >= 100){
         if (tuning_done == false) {
             sprintf(text, "TUNING... enc=%.1f; pwm=%.1f\r\n", Speed, u);
             for (int i = 0; i < strlen(text); i++) {
@@ -208,7 +210,7 @@ void Relay_AutoTune() {
 }
 
 void Calculate_PID_ZieglerNichols() {
-		float h = 0.01; //Chu ky lay mau
+		
     volatile float Ku = (4.0 * d) / (3.14159 * a);
     Kp = 0.6 * Ku;
     Ti = 0.5 * Tu;
@@ -220,23 +222,35 @@ void Calculate_PID_ZieglerNichols() {
 //    Td = 0.0;      
 //    Kd = 0.0;
 
-    q0 = Kp + Ki * h + (Kd / h);
-    q1 = -(Kp + 2.0 * (Kd / h));
-    q2 = Kd / h;
+//    q0 = Kp + Ki * h + (Kd / h);
+//    q1 = -(Kp + 2.0 * (Kd / h));
+//    q2 = Kd / h;
 	
 		
 }
 
 void PID_Velocity_Control() {
     e0 = Setpoint - Speed;
-    volatile float delta_u = q0 * e0 + q1 * e1 + q2 * e2;
+		// 1. Khâu P (Gi? b = 1): dP = Kp * (e0 - e1)
+    float delta_P = Kp * (e0 - e1);
+
+    // 2. Khâu I (Backward): dI = Ki * h * e0
+    float delta_I = Ki * h * e0;
+
+    // 3. Khâu D v?i c = 0 (Ch? dùng Speed, không dính dáng d?n Setpoint)
+    // Ð?o hàm c?a -Speed: dD = (Kd / h) * -(Speed - 2*Speed_prev1 + Speed_prev2)
+    float delta_D = (Kd / h) * -(Speed - 2.0 * Speed_prev1 + Speed_prev2);
+    //volatile float delta_u = q0 * e0 + q1 * e1 + q2 * e2;
+		volatile float delta_u = delta_P + delta_I + delta_D;
     u = u_prev + delta_u; //Công dôn ra tin hiêu thu tê
 		//Anti-Windup
     if (u > 100.0) u = 100.0; // Gi?i h?n max PWM = 100%
     if (u < 0.0)   u = 0.0;   // Gi?i h?n min PWM = 0%
 	
-    e2 = e1;
+    //e2 = e1;
     e1 = e0;
+		Speed_prev2 = Speed_prev1; // Ð?y d? li?u lùi v? quá kh?
+    Speed_prev1 = Speed;
     u_prev = u;
 
 		TIM3->CCR1 = (uint32_t)(u * 10.0);
