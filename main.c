@@ -3,11 +3,12 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h> // Thêm thu vi?n này ? d?u file d? dùng hàm atof()
 
 uint32_t SystemCoreClock = 2097152U;
 #define PULSES_PER_REVOLUTION 1320.0f
 
-float Setpoint = 100.0;
+float Setpoint = 80.0;
 float alpha_encoder = 0.2f; 
 float d = 100.0;      // Biên do Ro-le (bam xung PWM 100%) xuât 100% công suât PWM
 
@@ -26,6 +27,10 @@ volatile float speed_max = 0.0;
 volatile float speed_min = 9999.0;   
 volatile float e0 = 0, e1 = 0, e2 = 0; // Sai sô: Hiên tai, truoc do, truoc do nua
 volatile bool tuning_done = false;   // chay xong Ro-le chua? (Chua)
+// Khai báo bi?n toàn c?c
+volatile char rx_buffer[16];
+volatile uint8_t rx_index = 0;
+volatile bool new_setpoint_received = false;
 
 void SystemInit (void){}
 void Encoder_Init(void) {
@@ -82,10 +87,11 @@ void PWM_Init(void) {
 
 void SysTick_Handler(void) {//ngat
     uwTick += 10; 
-    volatile int16_t encoder_count = (int16_t)TIM2->CNT; 
-    volatile float speed_rpm = ((float)(encoder_count - encoder_count_prev) * 100.0f * 60.0f) / PULSES_PER_REVOLUTION;
+    volatile int16_t encoder_count = TIM2->CNT; 
+		volatile int16_t delta_ticks = (int16_t)(encoder_count - encoder_count_prev);
+    volatile float speed_rpm = (delta_ticks * 100.0f * 60.0f) / PULSES_PER_REVOLUTION;
     // Loc thông thâp EMA
-    Speed = (alpha_encoder * speed_rpm) + ((1.0f - alpha_encoder) * speed_rpm);
+		Speed = (alpha_encoder * speed_rpm) + ((1.0f - alpha_encoder) * Speed);
 		encoder_count_prev = encoder_count;
 }
 
@@ -110,20 +116,35 @@ int main(void){
 	PWM_Init();
   Encoder_Init();
 	volatile uint32_t last = 0;
+	volatile uint32_t last_pid_tick = 0; 
 	volatile bool is_calculated = false; // tinh xong Kp, Ti, Td chua? (Chua)
 	char text[32];
 	char t[32];
 	
 	while (1){
 		if (tuning_done == false) {
-    Relay_AutoTune();
+			if (uwTick - last_pid_tick >= 10) {
+				Relay_AutoTune();
+				last_pid_tick = uwTick;
+			}
 		} else {
-    if (is_calculated == false) {
+			if (is_calculated == false) {
         Calculate_PID_ZieglerNichols();
         is_calculated = true;
+			}
+			if (uwTick - last_pid_tick >= 10) {
+				PID_Velocity_Control(); 
+				last_pid_tick = uwTick;
+			}
+		}
+		if (new_setpoint_received) {
+        float temp_setpoint = atof((const char*)rx_buffer); // Chuy?n chu?i thành float
+        
+        if (temp_setpoint >= 0 && temp_setpoint <= 1000) { // Gi?i h?n m?t cách an toàn
+            Setpoint = temp_setpoint;
+        }
+        new_setpoint_received = false;
     }
-    PID_Velocity_Control(); 
-	}
 	if (uwTick - last >= 500){
         if (tuning_done == false) {
             sprintf(text, "TUNING... enc=%.1f; pwm=%.1f\r\n", Speed, u);
@@ -172,6 +193,7 @@ void Relay_AutoTune() {
             Tu = (t_end - t_start) / 1000.0; //(ms->s)
             a = (speed_max - speed_min) / 2.0;
 						u_prev = u;
+						crossing_count = 0;
             tuning_done = true; //Tuning xong!
         }
     }
@@ -201,6 +223,8 @@ void Calculate_PID_ZieglerNichols() {
     q0 = Kp + Ki * h + (Kd / h);
     q1 = -(Kp + 2.0 * (Kd / h));
     q2 = Kd / h;
+	
+		
 }
 
 void PID_Velocity_Control() {
@@ -216,4 +240,42 @@ void PID_Velocity_Control() {
     u_prev = u;
 
 		TIM3->CCR1 = (uint32_t)(u * 10.0);
+}
+
+void USART2_IRQHandler(void)
+{
+    // Ki?m tra xem ng?t có ph?i do nh?n d? li?u (RXNE) không
+    if (USART2->ISR & USART_ISR_RXNE) 
+    {
+        char c = (char)(USART2->RDR); // Ð?c ký t?
+				if (c == 't') {
+					tuning_done = false;
+            // Ph?i "t?y não" toàn b? bi?n c?a quá trình Tune tru?c
+            crossing_count = 0;
+            speed_max = 0.0;
+            speed_min = 9999.0;
+            error_prev = 0.0;
+            t_start = 0;
+            
+            // T?m th?i ng?t d?ng co 1 nh?p d? nó r?t t?c d? xu?ng, 
+            // t?o dà cho Ro-le v?t lên b?t dao d?ng chu?n xác
+            u = 0; 
+            TIM3->CCR1 = 0;
+					return;
+				}
+        
+        if (c == '\n' || c == '\r') // Ký t? k?t thúc
+        {
+            if (rx_index > 0) // Có d? li?u trong buffer
+            {
+                rx_buffer[rx_index] = '\0'; // K?t thúc chu?i C
+                new_setpoint_received = true; 
+            }
+            rx_index = 0; // Reset index cho l?n nh?n sau
+        }
+        else if (rx_index < sizeof(rx_buffer) - 1) 
+        {
+            rx_buffer[rx_index++] = c; // Luu ký t? vào buffer
+        }
+    }
 }
