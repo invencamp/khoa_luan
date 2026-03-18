@@ -28,20 +28,23 @@ Project File Date:  03/03/2026
 *** Using Compiler 'V6.24', folder: 'C:\Users\admin\AppData\Local\Keil_v5\ARM\ARMCLANG\Bin'
 Rebuild target 'Target_1'
 assembling startup_stm32l073xx.s...
-main.c(153): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
-  153 |             for (int i = 0; i < strlen(text); i++) {
+main.c(140): warning: unused variable 'last_pid_tick' [-Wunused-variable]
+  140 |         volatile uint32_t last_pid_tick = 0; 
+      |                           ^~~~~~~~~~~~~
+main.c(171): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
+  171 |             for (int i = 0; i < strlen(text); i++) {
       |                             ~ ^ ~~~~~~~~~~~~
-main.c(160): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
-  160 |             for (int i = 0; i < strlen(text); i++) {
+main.c(178): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
+  178 |             for (int i = 0; i < strlen(text); i++) {
       |                             ~ ^ ~~~~~~~~~~~~
-main.c(165): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
-  165 |             for (int j = 0; j < strlen(t); j++) {
+main.c(183): warning: comparison of integers of different signs: 'int' and 'unsigned int' [-Wsign-compare]
+  183 |             for (int j = 0; j < strlen(t); j++) {
       |                             ~ ^ ~~~~~~~~~
-3 warnings generated.
+4 warnings generated.
 compiling main.c...
 linking...
-Program Size: Code=17980 RO-data=1076 RW-data=24 ZI-data=1744  
-".\Objects\khoa_luan.axf" - 0 Error(s), 3 Warning(s).
+Program Size: Code=18152 RO-data=1076 RW-data=28 ZI-data=1752  
+".\Objects\khoa_luan.axf" - 0 Error(s), 4 Warning(s).
 
 <h2>Software Packages used:</h2>
 

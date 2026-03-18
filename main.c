@@ -10,7 +10,7 @@ uint32_t SystemCoreClock = 2097152U;
 
 float Setpoint = 80.0;
 float alpha_encoder = 0.2f; 
-float d = 100.0;      // Biên do Ro-le (bam xung PWM 100%) xuât 100% công suât PWM
+float d = 50.0;      // Biên do Ro-le (bam xung PWM 100%) xuât 100% công suât PWM
 float h = 0.01; //Chu ky lay mau
 
 volatile uint32_t uwTick;
@@ -29,6 +29,12 @@ volatile float speed_max = 0.0;
 volatile float speed_min = 9999.0;   
 volatile float e0 = 0, e1 = 0, e2 = 0; // Sai sô: Hiên tai, truoc do, truoc do nua
 volatile bool tuning_done = false;   // chay xong Ro-le chua? (Chua)
+volatile bool is_calculated = false; // tinh xong Kp, Ti, Td chua? (Chua)
+
+volatile float ad = 0.0, bd = 0.0;
+volatile float delta_D_prev = 0.0; 
+float N_filter = 10.0; // Tham s? b? l?c (N thu?ng t? 8 d?n 20)
+
 // Khai báo bi?n toàn c?c
 volatile char rx_buffer[16];
 volatile uint8_t rx_index = 0;
@@ -87,6 +93,10 @@ void PWM_Init(void) {
     TIM3->CR1 |= TIM_CR1_CEN;                                // Bat dâu dêm! (cho phép Timer hoat dông)
 }
 
+void Relay_AutoTune();
+void Calculate_PID_ZieglerNichols();
+void PID_Velocity_Control();
+
 void SysTick_Handler(void) {//ngat
     uwTick += 10; 
     volatile int16_t encoder_count = TIM2->CNT; 
@@ -95,11 +105,20 @@ void SysTick_Handler(void) {//ngat
     // Loc thông thâp EMA
 		Speed = (alpha_encoder * speed_rpm) + ((1.0f - alpha_encoder) * Speed);
 		encoder_count_prev = encoder_count;
+	
+		if (tuning_done == false) {
+        Relay_AutoTune();
+    } else {
+        // Ch? tính thông s? Z-N dúng 1 l?n khi v?a chuy?n mode
+        if (is_calculated == false) {
+            Calculate_PID_ZieglerNichols();
+            is_calculated = true;
+        }
+        PID_Velocity_Control();
+    }
 }
 
-void Relay_AutoTune();
-void Calculate_PID_ZieglerNichols();
-void PID_Velocity_Control();
+
 
 int main(void){
 	SysTick->LOAD = (SystemCoreClock / 100) - 1;
@@ -119,26 +138,25 @@ int main(void){
   Encoder_Init();
 	volatile uint32_t last = 0;
 	volatile uint32_t last_pid_tick = 0; 
-	volatile bool is_calculated = false; // tinh xong Kp, Ti, Td chua? (Chua)
 	char text[32];
 	char t[32];
 	
 	while (1){
-		if (tuning_done == false) {
-			if (uwTick - last_pid_tick >= 10) {
-				Relay_AutoTune();
-				last_pid_tick = uwTick;
-			}
-		} else {
-			if (is_calculated == false) {
-        Calculate_PID_ZieglerNichols();
-        is_calculated = true;
-			}
-			if (uwTick - last_pid_tick >= 10) {
-				PID_Velocity_Control(); 
-				last_pid_tick = uwTick;
-			}
-		}
+//		if (tuning_done == false) {
+//			if (uwTick - last_pid_tick >= 10) {
+//				Relay_AutoTune();
+//				last_pid_tick = uwTick;
+//			}
+//		} else {
+//			if (is_calculated == false) {
+//        Calculate_PID_ZieglerNichols();
+//        is_calculated = true;
+//			}
+//			if (uwTick - last_pid_tick >= 10) {
+//				PID_Velocity_Control(); 
+//				last_pid_tick = uwTick;
+//			}
+//		}
 		if (new_setpoint_received) {
         float temp_setpoint = atof((const char*)rx_buffer); // Chuy?n chu?i thành float
         
@@ -221,6 +239,17 @@ void Calculate_PID_ZieglerNichols() {
 	//test bo Kd
 //    Td = 0.0;      
 //    Kd = 0.0;
+	
+		// TÍNH TOÁN H? S? B? L?C KHÂU D (Dùng Backward differences)
+    ad = Td / (Td + N_filter * h);
+    bd = (Kp * Td * N_filter) / (Td + N_filter * h);
+
+    // K? th?a tr?ng thái cho Bumpless Transfer
+    u_prev = u;               
+    e1 = Setpoint - Speed;    
+    Speed_prev1 = Speed;
+    Speed_prev2 = Speed;
+    delta_D_prev = 0.0; // Reset s? gia khâu D cu
 
 //    q0 = Kp + Ki * h + (Kd / h);
 //    q1 = -(Kp + 2.0 * (Kd / h));
@@ -237,9 +266,9 @@ void PID_Velocity_Control() {
     // 2. Khâu I (Backward): dI = Ki * h * e0
     float delta_I = Ki * h * e0;
 
-    // 3. Khâu D v?i c = 0 (Ch? dùng Speed, không dính dáng d?n Setpoint)
-    // Ð?o hàm c?a -Speed: dD = (Kd / h) * -(Speed - 2*Speed_prev1 + Speed_prev2)
-    float delta_D = (Kd / h) * -(Speed - 2.0 * Speed_prev1 + Speed_prev2);
+    float delta_D = ad * delta_D_prev - bd * (Speed - 2.0 * Speed_prev1 + Speed_prev2);
+    delta_D_prev = delta_D; // Luu l?i giá tr? cho chu k? sau
+	
     //volatile float delta_u = q0 * e0 + q1 * e1 + q2 * e2;
 		volatile float delta_u = delta_P + delta_I + delta_D;
     u = u_prev + delta_u; //Công dôn ra tin hiêu thu tê
